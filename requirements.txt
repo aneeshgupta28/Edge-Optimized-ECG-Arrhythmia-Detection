@@ -1,0 +1,8 @@
+numpy>=1.26.0
+pandas>=2.2.0
+scikit-learn>=1.4.0
+xgboost>=2.0.0
+matplotlib>=3.8.0
+onnx>=1.16.0
+onnxmltools>=1.13.0
+onnxruntime>=1.17.0
