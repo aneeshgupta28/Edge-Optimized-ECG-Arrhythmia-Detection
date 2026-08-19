@@ -1,0 +1,128 @@
+# Edge-Optimized ECG Arrhythmia Detection Configuration
+
+# Reproducibility
+seed: 42
+
+# Paths
+data:
+  mitbih_dir: "data/mitbih"
+  features_csv: "data/features_beat.csv"
+
+results:
+  dir: "results"
+  models_dir: "models"
+
+# MIT-BIH AAMI inter-patient split (de Chazal 2004)
+# Records 102, 104, 107, 217 excluded (pacemaker patients)
+splits:
+  ds1:  # Training set
+    - 101
+    - 106
+    - 108
+    - 109
+    - 112
+    - 114
+    - 115
+    - 116
+    - 118
+    - 119
+    - 122
+    - 124
+    - 201
+    - 203
+    - 205
+    - 207
+    - 208
+    - 209
+    - 215
+    - 220
+    - 223
+    - 230
+  ds2:  # Testing set
+    - 100
+    - 103
+    - 105
+    - 111
+    - 113
+    - 117
+    - 121
+    - 123
+    - 200
+    - 202
+    - 210
+    - 212
+    - 213
+    - 214
+    - 219
+    - 221
+    - 222
+    - 228
+    - 231
+    - 232
+    - 233
+    - 234
+
+# Signal preprocessing
+preprocessing:
+  fs: 360
+  bandpass_low: 0.5
+  bandpass_high: 40.0
+  filter_order: 4
+  notch_freq: 60   # 60 Hz for MIT-BIH (recorded in US). Use 50 for EU.
+
+# Beat segmentation
+segmentation:
+  pre_samples: 90   # samples before R-peak  (at 360 Hz → 250ms)
+  post_samples: 110 # samples after R-peak    (at 360 Hz → 306ms)
+  # total window: 200 samples ≈ 556ms — covers P, QRS, T
+
+# Feature extraction
+features:
+  # RR-interval context window (beats)
+  rr_context: 10
+  # Wavelet decomposition
+  wavelet: "db4"
+  wavelet_levels: 4
+  # DCT coefficients to keep
+  dct_n_coeffs: 6
+  # Frequency-domain HRV bands (Hz)
+  vlf_band: [0.0, 0.04]
+  lf_band: [0.04, 0.15]
+  hf_band: [0.15, 0.40]
+  # Morphology windows (fraction of beat window)
+  qrs_window: [35, 65]      # samples around R-peak for QRS
+  st_window:  [80, 110]     # ST segment region (post-samples region)
+  t_window:   [65, 110]     # T-wave region
+
+# Training
+training:
+  cv_folds: 5
+  use_smote: true
+  class_weight: "balanced"   # fallback if SMOTE off
+
+  # Classifier hyperparameters
+  logistic_regression:
+    C: [0.01, 0.1, 1.0, 10.0]
+    solver: "lbfgs"
+    max_iter: 1000
+
+  svm:  # LinearSVC — O(n), orders of magnitude faster than RBF-SVM
+    C: [0.01, 0.1, 1.0, 10.0]
+    max_iter: 2000
+
+  random_forest:
+    n_estimators: [100, 300]
+    max_depth: [10, 20, null]
+    min_samples_leaf: 2
+
+  xgboost:
+    n_estimators: [100, 300]
+    max_depth: [4, 6]
+    learning_rate: [0.05, 0.1]
+    subsample: 0.8
+    colsample_bytree: 0.8
+
+# Edge benchmarking
+benchmark:
+  n_repeats: 10000   # number of inference calls for latency measurement
+  onnx_opset: 12
