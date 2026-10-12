@@ -2,7 +2,7 @@
 Evaluation & Visualisation
 ===========================
 Loads experiment results and produces:
-  1. Confusion matrices (5×5 heatmap per best model)
+  1. Confusion matrices (4×4 N/S/V/F heatmap per model)
   2. Per-class sensitivity / PPV bar chart (ablation)
   3. Feature importance chart (for tree models)
   4. Ablation comparison (E1 vs E2 vs E3 macro-F1)
@@ -28,7 +28,7 @@ import pandas as pd
 import seaborn as sns
 
 sys.path.insert(0, str(Path(__file__).parent))
-from aami_mappings import AAMI_CLASSES
+from aami_mappings import EVAL_CLASSES, EXCLUDED_CLASSES, AAMI_TO_INT
 from utils import get_logger, load_config, ensure_dirs, project_root
 
 log = get_logger("evaluate")
@@ -66,19 +66,20 @@ def plot_confusion_matrix(
 
     cols_present = [c for c in feature_cols if c in df_test.columns]
     sub = df_test[cols_present + ["label"]].dropna()
+    sub = sub[~sub["label"].isin([AAMI_TO_INT[c] for c in EXCLUDED_CLASSES])]
     X = sub[cols_present].values.astype(np.float32)
     y_true = sub["label"].values.astype(int)
 
     y_pred = pipeline.predict(X)
 
     from sklearn.metrics import confusion_matrix
-    cm = confusion_matrix(y_true, y_pred, labels=list(range(5)))
+    cm = confusion_matrix(y_true, y_pred, labels=[AAMI_TO_INT[c] for c in EVAL_CLASSES])
 
     fig, ax = plt.subplots(figsize=(7, 6))
     sns.heatmap(
         cm, annot=True, fmt="d", cmap="Blues",
-        xticklabels=AAMI_CLASSES,
-        yticklabels=AAMI_CLASSES,
+        xticklabels=EVAL_CLASSES,
+        yticklabels=EVAL_CLASSES,
         ax=ax, linewidths=0.5,
     )
     exp  = report["experiment"]
@@ -104,7 +105,7 @@ def plot_per_class_metrics(summary_csv: Path, out_dir: Path) -> None:
     for exp in df["experiment"].unique():
         sub = df[df["experiment"] == exp]
 
-        recall_cols = [f"recall_{c}" for c in AAMI_CLASSES]
+        recall_cols = [f"recall_{c}" for c in EVAL_CLASSES]
         melted = sub.melt(
             id_vars=["classifier"],
             value_vars=recall_cols,
@@ -114,17 +115,17 @@ def plot_per_class_metrics(summary_csv: Path, out_dir: Path) -> None:
         melted["class"] = melted["metric"].str.replace("recall_", "")
 
         fig, ax = plt.subplots(figsize=(9, 5))
-        x = np.arange(len(AAMI_CLASSES))
+        x = np.arange(len(EVAL_CLASSES))
         clf_names = sub["classifier"].tolist()
         n = len(clf_names)
         width = 0.8 / n
 
         for i, clf in enumerate(clf_names):
-            vals = [sub[sub["classifier"] == clf][f"recall_{c}"].values[0] for c in AAMI_CLASSES]
+            vals = [sub[sub["classifier"] == clf][f"recall_{c}"].values[0] for c in EVAL_CLASSES]
             ax.bar(x + i * width - 0.4 + width / 2, vals, width=width, label=clf, alpha=0.85)
 
         ax.set_xticks(x)
-        ax.set_xticklabels(AAMI_CLASSES)
+        ax.set_xticklabels(EVAL_CLASSES)
         ax.set_ylim(0, 1.05)
         ax.set_ylabel("Sensitivity (Recall)")
         ax.set_title(f"Per-Class Sensitivity: Experiment {exp}")

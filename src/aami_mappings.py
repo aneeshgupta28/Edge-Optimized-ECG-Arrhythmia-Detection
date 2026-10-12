@@ -54,6 +54,10 @@ AAMI_CLASSES: list[str] = ["N", "S", "V", "F", "Q"]
 AAMI_TO_INT: dict[str, int] = {cls: i for i, cls in enumerate(AAMI_CLASSES)}
 INT_TO_AAMI: dict[int, str] = {i: cls for cls, i in AAMI_TO_INT.items()}
 
+# Q is excluded: only 15 Q beats remain after removing the paced records
+EXCLUDED_CLASSES: list[str] = ["Q"]
+EVAL_CLASSES: list[str] = [c for c in AAMI_CLASSES if c not in EXCLUDED_CLASSES]
+
 # Clinically important classes (used for emphasis in reporting)
 CLINICAL_FOCUS_CLASSES: list[str] = ["S", "V"]
 

@@ -114,6 +114,7 @@ def record_to_beats(
             r_peaks=beat_samples,
             fs=fs,
             feat_cfg=feat_cfg,
+            r_index=pre,
         )
 
         feats["label_aami"]  = aami_class

@@ -10,7 +10,7 @@ Experiment matrix:
   E4 — Top-K features by mutual information (feature selection)
 
 For each experiment × classifier:
-  - 5-fold cross-validation on DS1 (hyperparameter selection)
+  - 5-fold cross-validation on DS1, grouped by record (hyperparameter selection)
   - Final training on all of DS1 with best params
   - Evaluation on DS2 (inter-patient test set)
   - Save model and results to results/
@@ -43,14 +43,14 @@ from sklearn.metrics import (
     classification_report,
     f1_score,
 )
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
 from xgboost import XGBClassifier
 
 sys.path.insert(0, str(Path(__file__).parent))
-from aami_mappings import AAMI_CLASSES, INT_TO_AAMI
+from aami_mappings import EVAL_CLASSES, EXCLUDED_CLASSES, AAMI_TO_INT, INT_TO_AAMI
 from utils import get_logger, load_config, set_seed, ensure_dirs, project_root
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -101,13 +101,21 @@ def load_splits(csv_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     return ds1, ds2
 
 
-def get_Xy(df: pd.DataFrame, feature_cols: list[str]) -> tuple[np.ndarray, np.ndarray]:
-    """Extract feature matrix and label array, dropping NaN rows."""
+EXCLUDED_LABELS = [AAMI_TO_INT[c] for c in EXCLUDED_CLASSES]
+EVAL_LABELS = [AAMI_TO_INT[c] for c in EVAL_CLASSES]
+
+
+def get_Xy(
+    df: pd.DataFrame, feature_cols: list[str]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract feature matrix, labels and record ids, dropping NaN rows and Q beats."""
     cols_present = [c for c in feature_cols if c in df.columns]
-    sub = df[cols_present + ["label"]].dropna()
+    sub = df[cols_present + ["label", "record"]].dropna()
+    sub = sub[~sub["label"].isin(EXCLUDED_LABELS)]
     X = sub[cols_present].values.astype(np.float32)
     y = sub["label"].values.astype(int)
-    return X, y
+    groups = sub["record"].astype(str).values
+    return X, y, groups
 
 
 def top_k_features_by_mi(
@@ -206,6 +214,7 @@ def train_one(
     clf_name: str,
     X_train: np.ndarray,
     y_train: np.ndarray,
+    groups_train: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
     feature_names: list[str],
@@ -224,23 +233,25 @@ def train_one(
     clf = build_classifier(clf_name, train_cfg, seed)
     param_grid = get_param_grid(clf_name, train_cfg)
 
-    # Build pipeline: scale → (SMOTE →) classify
-    scaler = StandardScaler()
+    # Build pipeline: scale → (SMOTE →) classify. Trees don't need scaling.
+    is_tree = clf_name in ["random_forest", "xgboost"]
 
-    if use_smote:
-        smote = SMOTE(random_state=seed, k_neighbors=3)
+    if is_tree:
+        pipeline = Pipeline([("clf", clf)])
+    elif use_smote:
         pipeline = ImbPipeline([
-            ("scaler", scaler),
-            ("smote",  smote),
+            ("scaler", StandardScaler()),
+            ("smote",  SMOTE(random_state=seed, k_neighbors=3)),
             ("clf",    clf),
         ])
     else:
         pipeline = Pipeline([
-            ("scaler", scaler),
+            ("scaler", StandardScaler()),
             ("clf",    clf),
         ])
 
-    cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    # Group folds by record so validation patients are unseen
+    cv = StratifiedGroupKFold(n_splits=n_folds, shuffle=True, random_state=seed)
 
     t0 = perf_counter()
     if param_grid:
@@ -249,7 +260,7 @@ def train_one(
             cv=cv, scoring="f1_macro",
             n_jobs=-1, refit=True, verbose=0,
         )
-        grid.fit(X_train, y_train)
+        grid.fit(X_train, y_train, groups=groups_train)
         best_pipeline = grid.best_estimator_
         best_params = grid.best_params_
         cv_score = grid.best_score_
@@ -266,10 +277,11 @@ def train_one(
 
     acc      = accuracy_score(y_test, y_pred)
     bal_acc  = balanced_accuracy_score(y_test, y_pred)
-    macro_f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
+    macro_f1 = f1_score(y_test, y_pred, labels=EVAL_LABELS, average="macro", zero_division=0)
     report   = classification_report(
         y_test, y_pred,
-        target_names=AAMI_CLASSES,
+        labels=EVAL_LABELS,
+        target_names=EVAL_CLASSES,
         zero_division=0,
         output_dict=True,
     )
@@ -311,18 +323,18 @@ def run_experiment(
     log.info(f"EXPERIMENT {exp_name} - {len(feature_cols)} features: {feature_cols}")
     log.info(f"{'='*60}")
 
-    X_train, y_train = get_Xy(ds1, feature_cols)
-    X_test,  y_test  = get_Xy(ds2, feature_cols)
+    X_train, y_train, groups_train = get_Xy(ds1, feature_cols)
+    X_test,  y_test,  _            = get_Xy(ds2, feature_cols)
 
     log.info(f"DS1: {X_train.shape}   DS2: {X_test.shape}")
-    log.info(f"Class dist (train): { {INT_TO_AAMI[i]: int(np.sum(y_train==i)) for i in range(5)} }")
-    log.info(f"Class dist (test):  { {INT_TO_AAMI[i]: int(np.sum(y_test ==i)) for i in range(5)} }")
+    log.info(f"Class dist (train): { {INT_TO_AAMI[i]: int(np.sum(y_train==i)) for i in EVAL_LABELS} }")
+    log.info(f"Class dist (test):  { {INT_TO_AAMI[i]: int(np.sum(y_test ==i)) for i in EVAL_LABELS} }")
 
     summary_rows = []
 
     for clf_name in clf_names:
         result = train_one(
-            clf_name, X_train, y_train, X_test, y_test,
+            clf_name, X_train, y_train, groups_train, X_test, y_test,
             feature_cols, train_cfg, seed,
         )
 
@@ -358,11 +370,11 @@ def run_experiment(
             "cv_f1":       result["cv_f1"],
             "n_features":  len(feature_cols),
             "train_time_s": result["train_time"],
-            # Per-class sensitivity (recall) for N, S, V, F, Q
+            # Per-class sensitivity (recall) for N, S, V, F
             **{f"recall_{cls}": result["report"].get(cls, {}).get("recall", float("nan"))
-               for cls in AAMI_CLASSES},
+               for cls in EVAL_CLASSES},
             **{f"precision_{cls}": result["report"].get(cls, {}).get("precision", float("nan"))
-               for cls in AAMI_CLASSES},
+               for cls in EVAL_CLASSES},
         })
 
     return pd.DataFrame(summary_rows)
@@ -400,7 +412,7 @@ def main(config_path: str = "configs/default.yaml", experiment: str | None = Non
     for exp_name in experiments_to_run:
         if exp_name == "E4":
             # Top-K features by mutual information
-            X_tr, y_tr = get_Xy(ds1, ALL_FEATURES)
+            X_tr, y_tr, _ = get_Xy(ds1, ALL_FEATURES)
             cols_present = [c for c in ALL_FEATURES if c in ds1.columns]
             top_k = top_k_features_by_mi(X_tr, y_tr, cols_present, k=15, seed=seed)
             feature_cols = top_k
@@ -415,7 +427,7 @@ def main(config_path: str = "configs/default.yaml", experiment: str | None = Non
 
     # Run E4 if in full mode
     if experiment is None or experiment.upper() == "E4":
-        X_tr, y_tr = get_Xy(ds1, ALL_FEATURES)
+        X_tr, y_tr, _ = get_Xy(ds1, ALL_FEATURES)
         cols_present = [c for c in ALL_FEATURES if c in ds1.columns]
         top_k = top_k_features_by_mi(X_tr, y_tr, cols_present, k=15, seed=seed)
         summary_e4 = run_experiment(

@@ -72,9 +72,9 @@ preprocessing:
 
 # Beat segmentation
 segmentation:
-  pre_samples: 90   # samples before R-peak  (at 360 Hz → 250ms)
-  post_samples: 110 # samples after R-peak    (at 360 Hz → 306ms)
-  # total window: 200 samples ≈ 556ms — covers P, QRS, T
+  pre_samples: 90   # samples before R-peak  (at 360 Hz → 250 ms)
+  post_samples: 144 # samples after R-peak    (at 360 Hz → 400 ms)
+  # total window: 234 samples ≈ 650ms — covers P, QRS, T
 
 # Feature extraction
 features:
@@ -89,14 +89,17 @@ features:
   vlf_band: [0.0, 0.04]
   lf_band: [0.04, 0.15]
   hf_band: [0.15, 0.40]
-  # Morphology windows (fraction of beat window)
-  qrs_window: [35, 65]      # samples around R-peak for QRS
-  st_window:  [80, 110]     # ST segment region (post-samples region)
-  t_window:   [65, 110]     # T-wave region
+  # Morphology windows in ms relative to the R-peak
+  baseline_window_ms:   [-90, -50]   # PR segment
+  qrs_window_ms:        [-50, 50]
+  qrs_search_window_ms: [-100, 100]  # for QRS width
+  qrs_slope_threshold:  0.2
+  st_window_ms:         [60, 120]
+  t_window_ms:          [150, 400]
 
 # Training
 training:
-  cv_folds: 5
+  cv_folds: 5   # grouped by record
   use_smote: true
   class_weight: "balanced"   # fallback if SMOTE off
 

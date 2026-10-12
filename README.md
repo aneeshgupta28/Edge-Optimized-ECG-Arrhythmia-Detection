@@ -2,7 +2,7 @@
 
 This repository presents a machine learning pipeline for single-lead **per-beat ECG arrhythmia classification** evaluated under the ANSI/AAMI EC57 inter-patient protocol (DS1/DS2 record split) on the **MIT-BIH Arrhythmia Database** (100,705 annotated heartbeats across 44 patients).
 
-Trained classifiers are exported to **ONNX** format and benchmarked for embedded edge deployment, measuring single-beat inference latency, peak RAM memory footprint, and throughput under single-threaded execution constraints.
+Trained classifiers are exported to **ONNX**, checked against the trained model on the full test set, and benchmarked on a single CPU thread for single-beat inference latency, throughput and memory.
 
 ---
 
@@ -16,8 +16,8 @@ Trained classifiers are exported to **ONNX** format and benchmarked for embedded
                                                                |
                                                                v
 +------------------+     +-------------------+     +-------------------------+
-| Single-Beat ONNX | <-- | Quantization /    | <-- | 24 Domain Features      |
-| Benchmark (<18us)|     | ONNX Export       |     | (RR, Wavelet, DCT, HRV) |
+| Single-Beat ONNX | <-- | ONNX Export &     | <-- | 24 Domain Features      |
+| Benchmark (<18us)|     | Verification      |     | (RR, Wavelet, DCT, HRV) |
 +------------------+     +-------------------+     +-------------------------+
 ```
 
@@ -26,9 +26,10 @@ Trained classifiers are exported to **ONNX** format and benchmarked for embedded
 ## Methodological Highlights
 
 - **Inter-Patient Evaluation Protocol:** Strict ANSI/AAMI EC57 DS1 (22 train patients, 50,977 beats) vs DS2 (22 test patients, 49,668 beats) split to prevent data leakage across patient records.
-- **5-Class AAMI Standard Classification:** Normal (N), Supraventricular Ectopic (S), Ventricular Ectopic (V), Fusion (F), and Unknown (Q).
-- **Domain Feature Engineering (24 Features):** RR timing intervals, QRS/ST morphology, 4-level `db4` discrete wavelet transform energy sub-bands, Discrete Cosine Transform (DCT) shape descriptors, and Welch PSD frequency-domain HRV.
-- **Edge Deployment Profiling:** Single-threaded ONNX Runtime benchmarking measuring inference latency ($\mu$s/beat), peak RAM memory footprint (KB), and throughput (beats/sec).
+- **Grouped Cross-Validation:** Hyperparameters are tuned with 5-fold cross-validation on DS1 grouped by record, so no patient appears in both a training and a validation fold.
+- **AAMI Classes:** Normal (N), Supraventricular Ectopic (S), Ventricular Ectopic (V) and Fusion (F). Unknown (Q) is excluded: after removing the paced records only 15 Q beats remain (8 in DS1, 7 in DS2).
+- **Domain Feature Engineering (24 Features):** RR timing intervals; QRS width and R, ST and T-wave amplitudes measured in windows relative to the R-peak, against a PR-segment baseline; 4-level `db4` discrete wavelet transform energy sub-bands; Discrete Cosine Transform (DCT) shape descriptors; and Welch PSD frequency-domain HRV.
+- **Edge Deployment Profiling:** Single-threaded ONNX Runtime benchmarking of classifier latency ($\mu$s/beat), sequential and batched throughput, process memory increase, and model size. ONNX predictions are verified against the trained model on every DS2 beat.
 
 ---
 
@@ -71,7 +72,7 @@ Trained classifiers are exported to **ONNX** format and benchmarked for embedded
 │   ├── dataset.py             # Feature matrix builder (DS1/DS2 splits)
 │   ├── train.py               # Cross-validation & classifier training
 │   ├── evaluate.py            # Confusion matrices & evaluation plots
-│   ├── export_onnx.py         # ONNX model export & verification
+│   ├── export_onnx.py         # ONNX export & full-test-set verification
 │   ├── benchmark.py           # Single-beat latency, memory, throughput profiling
 │   └── utils.py               # Config loader, random seed, and logger setup
 ├── notebooks/
