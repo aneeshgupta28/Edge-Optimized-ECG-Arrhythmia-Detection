@@ -45,6 +45,7 @@ Trained classifiers are exported to **ONNX**, checked against the trained model 
 | **E3 (Full)** | LinearSVC | 78.9% | 0.439 | 53.8% | 84.2% | 76.5% |
 | **E3 (Full)** | Random Forest | 92.6% | 0.386 | 3.2% | 94.6% | 85.3% |
 | **E3 (Full)** | **XGBoost** | **92.8%** | **0.424** | **10.2%** | **95.6%** | **86.5%** |
+| **Raw beat + RR** | 1D CNN | 91.5% | 0.428 | 29.1% | 94.3% | 67.7% |
 
 ### ONNX Edge Performance Profile (XGBoost E3 Model)
 
